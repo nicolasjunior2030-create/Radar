@@ -215,6 +215,30 @@ export function overpassUrls(): string[] {
   return custom ? [custom, ...OVERPASS_URLS.filter((u) => u !== custom)] : OVERPASS_URLS;
 }
 
+// Por padrão a consulta ao Overpass é feita pelo NAVEGADOR do usuário (o
+// endereço de internet dele não é limitado como o dos servidores de nuvem).
+// A função devolve "need_overpass" com a consulta; o app executa e reenvia
+// a resposta em "osm_data". Com o secret OSM_SERVER_FETCH=1 a própria
+// função consulta o Overpass.
+export const serverFetchEnabled = () => env('OSM_SERVER_FETCH') === '1';
+
+// Resposta do Overpass enviada pelo app: só o formato esperado passa.
+export function validateOsmData(v: unknown): { elements: any[] } | null {
+  if (v === undefined || v === null) return null;
+  const els = (v as any)?.elements;
+  if (typeof v !== 'object' || !Array.isArray(els)) throw new HttpError(400, 'Dados do OpenStreetMap inválidos.');
+  if (els.length > 6000) throw new HttpError(413, 'Resposta do OpenStreetMap grande demais.');
+  const elements = els
+    .filter((e: any) => e && ['node', 'way', 'relation', 'area', 'count'].includes(e.type) && /^\d{1,15}$/.test(String(e.id)))
+    .map((e: any) => ({
+      type: String(e.type),
+      id: Number(e.id),
+      tags: Object.fromEntries(Object.entries(e.tags && typeof e.tags === 'object' ? e.tags : {}).slice(0, 80)
+        .map(([k, val]) => [String(k).slice(0, 60), String(val).slice(0, 300)])),
+    }));
+  return { elements };
+}
+
 // Executa a consulta tentando os servidores públicos em sequência.
 export async function overpass(ql: string, { perServerMs = 45000, totalMs = 120000 } = {}): Promise<any> {
   const started = Date.now();
@@ -505,13 +529,13 @@ export function osmDetailsQL(refs: Array<{ type: string; id: string }>): string 
   return `[out:json][timeout:25];\n(\n${refs.map((r) => `  ${r.type}(${r.id});`).join('\n')}\n);\nout tags;`;
 }
 
-async function refreshOsm(rows: any[], items: any[], errors: any[]) {
+async function refreshOsm(rows: any[], items: any[], errors: any[], osmData: { elements: any[] } | null) {
   const valid = rows.filter((row) => osmRef(row.source_id));
   rows.filter((row) => !osmRef(row.source_id)).forEach((row) => errors.push({ id: row.id, error: 'Identificador do OpenStreetMap inválido.' }));
   if (!valid.length) return;
-  let data: any;
+  let data: any = osmData;
   try {
-    data = await overpass(osmDetailsQL(valid.map((row) => osmRef(row.source_id)!)), { perServerMs: 20000, totalMs: 50000 });
+    if (!data) data = await overpass(osmDetailsQL(valid.map((row) => osmRef(row.source_id)!)), { perServerMs: 20000, totalMs: 50000 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     valid.forEach((row) => errors.push({ id: row.id, error: `${msg} Os dados mostrados são os salvos na última busca.` }));
@@ -534,8 +558,15 @@ export async function handler(req: Request): Promise<Response> {
   if (pre) return pre;
   try {
     const ctx = await requireUser(req);
-    const ids = validateIds(await readJson(req, 10000));
+    const body = await readJson(req, 2000000);
+    const ids = validateIds(body);
+    const osmData = validateOsmData(body.osm_data);
     const rows: any[] = (await rpc(ctx, 'get_companies_for_refresh', { p_ids: ids })) || [];
+    // Empresas do OpenStreetMap: o app consulta o Overpass pelo navegador e reenvia.
+    const osmRefs = rows.filter((r) => r.source === 'osm').map((r) => osmRef(r.source_id)).filter(Boolean);
+    if (osmRefs.length && !osmData && !serverFetchEnabled()) {
+      return json(200, { need_overpass: { ql: osmDetailsQL(osmRefs as Array<{ type: string; id: string }>) } });
+    }
     const items: any[] = [];
     const errors: any[] = [];
 
@@ -543,7 +574,7 @@ export async function handler(req: Request): Promise<Response> {
       errors.push({ id: row.id, error: 'Contato manual: não há dados de uma fonte para atualizar.' }));
     await Promise.all([
       refreshGoogle(rows.filter((r) => r.source === 'google_places'), items, errors),
-      refreshOsm(rows.filter((r) => r.source === 'osm'), items, errors),
+      refreshOsm(rows.filter((r) => r.source === 'osm'), items, errors, osmData),
     ]);
 
     if (items.length) {

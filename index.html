@@ -1018,7 +1018,7 @@ const api = {
 
   // Radar
   searchPlaces: (input) => fn('places-search', input),
-  placeDetails: (ids) => fn('places-details', { company_ids: ids }),
+  placeDetails: (ids, osmData) => fn('places-details', { company_ids: ids, ...(osmData ? { osm_data: osmData } : {}) }),
 
   // CRM
   saveCompany: (companyId) => rpc('save_company', { p_company_id: companyId }),
@@ -1644,6 +1644,7 @@ const { esc, openModal, toast, withBusy, errMsg, notice } = __req("lib/ui.js");
 const { normalizeBrazilPhone, fillTemplate, waLink, TEMPLATES } = __req("lib/whatsapp.js");
 const { getPrefs, currentTemplate } = __req("lib/prefs.js");
 const { api, isReady } = __req("lib/api.js");
+const { overpassFromBrowser } = __req("lib/osm.js");
 
 const STATUS = [
   ['novo', 'Novo contato'],
@@ -1822,7 +1823,8 @@ function openDetailsModal(c, { onAction } = {}) {
     const live = m.querySelector('#det-live');
     if (!c.id || !isReady()) { live.innerHTML = ''; return; }
     try {
-      const r = await api.placeDetails([c.id]);
+      let r = await api.placeDetails([c.id]);
+      if (r.need_overpass) r = await api.placeDetails([c.id], await overpassFromBrowser(r.need_overpass.ql, { timeoutMs: 30000 }));
       const fresh = r.items?.[0];
       if (!fresh) { live.innerHTML = notice(esc(r.errors?.[0]?.error || 'Sem dados atualizados.'), 'info'); return; }
       Object.assign(c, { ...fresh, saved: c.saved, contact_status: c.contact_status });
@@ -1856,6 +1858,63 @@ function detailsList(c) {
 }
 
 Object.assign(__exports, { STATUS, statusLabel, statusBadge, PROJECT_STATUS, projectStatusLabel, projectBadge, sourceName, companyCard, openWhatsAppModal, openDetailsModal });
+};
+
+// ---- lib/osm.js ----
+__defs["lib/osm.js"] = function (__exports) {
+// Consulta o OpenStreetMap (Overpass) direto do navegador.
+// Os servidores gratuitos do Overpass limitam o uso por endereço de internet:
+// do aparelho do usuário a consulta é aceita; dos servidores de nuvem
+// (Supabase) ela costuma ser recusada. A função do Supabase devolve a
+// consulta pronta ("need_overpass") e o app a executa aqui.
+const OVERPASS_URLS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
+
+const KEEP_TAG = /^(name|shop|amenity|craft|office|healthcare|tourism|leisure|cuisine|hairdresser|sport|brand|opening_hours|phone|mobile|website|url|contact:(phone|mobile|whatsapp|website|instagram|facebook)|addr:(street|housenumber|suburb|neighbourhood|district|city|postcode))$/;
+
+// Mantém só o necessário para a busca (a resposta enviada ao Supabase fica pequena).
+function compact(el) {
+  const meta = el.type === 'area' || el.type === 'count';
+  const tags = {};
+  for (const [k, v] of Object.entries(el.tags || {})) {
+    if (meta ? ['name', 'total', 'admin_level'].includes(k) : KEEP_TAG.test(k)) tags[k] = String(v).slice(0, 300);
+  }
+  return { type: el.type, id: el.id, tags };
+}
+
+async function overpassFromBrowser(ql, { timeoutMs = 60000 } = {}) {
+  const problems = [];
+  for (const url of OVERPASS_URLS) {
+    try {
+      const res = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: ql }), signal: AbortSignal.timeout(timeoutMs) });
+      if (!res.ok) {
+        problems.push(res.status === 429 ? 'limite de consultas' : `HTTP ${res.status}`);
+        continue;
+      }
+      const data = await res.json();
+      if (typeof data?.remark === 'string' && /runtime error|timed out|out of memory|rate_limited/i.test(data.remark)) {
+        problems.push('consulta demorou demais');
+        continue;
+      }
+      return { elements: (Array.isArray(data?.elements) ? data.elements : []).map(compact) };
+    } catch {
+      problems.push('sem resposta');
+    }
+  }
+  const why = problems.length ? ` (${[...new Set(problems)].join(', ')})` : '';
+  throw new Error(`Os servidores gratuitos do OpenStreetMap não responderam${why}. Confira sua internet e tente de novo em alguns minutos.`);
+}
+
+// Teste rápido e gratuito: o OpenStreetMap responde a partir deste aparelho?
+async function osmReachable() {
+  await overpassFromBrowser('[out:json][timeout:10];node(0);out ids;', { timeoutMs: 20000 });
+  return true;
+}
+
+Object.assign(__exports, { OVERPASS_URLS, overpassFromBrowser, osmReachable });
 };
 
 // ---- lib/charts.js ----
@@ -1914,6 +1973,7 @@ const { icon } = __req("lib/icons.js");
 const { esc, notice, sectionHead, toast, emptyState, loading, withBusy, errMsg, fmtInt } = __req("lib/ui.js");
 const { api, isConfigured, isReady } = __req("lib/api.js");
 const { companyCard, openWhatsAppModal, openDetailsModal } = __req("lib/components.js");
+const { overpassFromBrowser } = __req("lib/osm.js");
 
 const title = 'Radar de empresas';
 
@@ -2025,13 +2085,23 @@ async function search(root, { append = false } = {}) {
     try {
       const body = { ...state.input, pageToken: append ? state.nextPageToken : undefined };
       if (!append) root.querySelector('#radar-results').innerHTML = `<div style="grid-column:1/-1">${loading('Buscando empresas… no OpenStreetMap a primeira busca de uma cidade pode levar até 1 minuto.')}</div>`;
-      const r = await api.searchPlaces(body);
+      let r = await api.searchPlaces(body);
+      // OpenStreetMap: a consulta pesada é feita por este aparelho e devolvida à função.
+      let warning = r.warning || '';
+      for (let step = 0; r.need_overpass && step < 3; step++) {
+        if (!root.isConnected) return;
+        if (!append) root.querySelector('#radar-results').innerHTML = `<div style="grid-column:1/-1">${loading('Consultando o OpenStreetMap por este aparelho… pode levar até 1 minuto.')}</div>`;
+        const data = await overpassFromBrowser(r.need_overpass.ql);
+        r = await api.searchPlaces({ ...body, osm_stage: r.need_overpass.stage, osm_data: data });
+        warning = warning || r.warning || '';
+      }
+      if (r.need_overpass) throw new Error('O OpenStreetMap não completou a busca. Tente de novo.');
       if (!root.isConnected) return;
       state.query = r.query;
       state.nextPageToken = r.nextPageToken;
       state.stats = r.stats;
       state.source = r.source || 'google_places';
-      state.warning = r.warning || '';
+      state.warning = warning;
       state.cached = Boolean(r.cached);
       const known = new Set(append ? state.results.map((x) => x.source_id) : []);
       state.results = append ? state.results.concat(r.results.filter((x) => !known.has(x.source_id))) : r.results;
@@ -3255,6 +3325,7 @@ const { normalizeBrazilPhone } = __req("lib/whatsapp.js");
 const { openWhatsAppModal } = __req("lib/components.js");
 const { api, sb, isReady, currentSession, resetClient, loadProfile } = __req("lib/api.js");
 const { createClient } = __req("lib/sb.js");
+const { osmReachable } = __req("lib/osm.js");
 
 const title = 'Configurações';
 
@@ -3390,12 +3461,12 @@ async function testServer(root) {
     if (!r.places.configured) {
       set('places', BADGE.off('Não configurado'), `<span style="color:var(--gray)">${esc(r.places.message)} A busca usa o OpenStreetMap (grátis).</span>`);
     }
-    if (r.osm) {
-      show('osm', r.osm, r.search_source === 'osm' ? 'Em uso' : 'Reserva');
-      if (!r.osm.ok) set('osm', BADGE.warn('Sem resposta agora'), `<span style="color:var(--gray)">${esc(r.osm.message)}</span>`);
-    } else {
-      set('osm', BADGE.off('Atualize as funções'), 'Publique a nova versão da função integrations-status.');
-    }
+    // O OpenStreetMap é consultado por este aparelho: o teste também é feito daqui.
+    const inUse = !r.places.ok;
+    osmReachable()
+      .then(() => set('osm', BADGE.ok(inUse ? 'Em uso' : 'Reserva'),
+        `Respondendo a partir deste aparelho. ${inUse ? 'É a fonte usada no Radar agora.' : 'Usado se o Google falhar.'}`))
+      .catch((e) => set('osm', BADGE.warn('Sem resposta agora'), `<span style="color:var(--gray)">${esc(errMsg(e))}</span>`));
     show('anthropic', r.anthropic, r.anthropic.model_name || 'Conectado');
   } catch (e) {
     const msg = `<span style="color:var(--danger)">${esc(errMsg(e))}</span>`;
