@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Atualizar o banco · Radar Empresarial Brasil</title>
+<style>
+:root{--bg:#080808;--card:#121212;--line:#2a2416;--gold:#D4AF37;--gold2:#F5D76E;--txt:#fff;--gray:#A1A1A1}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:28px 18px 60px}
+.eyebrow{color:var(--gold);letter-spacing:.18em;font-size:12px;text-transform:uppercase}
+h1{font-size:28px;line-height:1.15;margin:8px 0 6px}
+p{color:var(--gray);margin:0 0 18px}
+ol{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px 18px 40px;margin:0 0 18px}
+li{margin:6px 0} b{color:var(--txt)}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:52px;border-radius:12px;font-weight:700;
+  font-size:16px;letter-spacing:.06em;text-transform:uppercase;text-decoration:none;border:1px solid var(--gold);margin:10px 0;cursor:pointer}
+.gold{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#111}
+.ghost{background:transparent;color:var(--gold2)}
+#ok{min-height:24px;color:var(--gold2);text-align:center;font-weight:600}
+textarea{width:100%;height:220px;background:#0e0e0e;color:#ddd;border:1px solid var(--line);border-radius:12px;padding:12px;
+  font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;margin-top:14px}
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Radar Empresarial Brasil</div>
+  <h1>Atualizar o banco (busca grátis)</h1>
+  <p>Adiciona ao seu banco o que a busca pelo OpenStreetMap precisa. Não apaga suas empresas, contatos nem sites.</p>
+  <ol>
+    <li>Toque em <b>Copiar o código</b>.</li>
+    <li>Toque em <b>Abrir o SQL Editor</b> (Supabase).</li>
+    <li>Toque na área de texto, segure e escolha <b>Colar</b>.</li>
+    <li>Toque em <b>Run</b>. Se aparecer um aviso perguntando se quer continuar, confirme.</li>
+    <li>Deve aparecer <b>Success</b>. Pronto!</li>
+  </ol>
+  <button class="btn gold" id="copy" type="button">Copiar o código</button>
+  <div id="ok" aria-live="polite"></div>
+  <a class="btn ghost" href="https://supabase.com/dashboard/project/gzzjeyptwruudsaqayyo/sql/new" target="_blank" rel="noopener">Abrir o SQL Editor</a>
+  <textarea id="sql" readonly spellcheck="false">-- 002 · OpenStreetMap como fonte gratuita do Radar (aplicar sobre o schema existente; pode rodar de novo)
+
+alter table public.companies drop constraint if exists companies_source_check;
+
+alter table public.companies add constraint companies_source_check check (source in (&#x27;google_places&#x27;, &#x27;osm&#x27;, &#x27;manual&#x27;));
+
+create table if not exists public.osm_cache (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  cache_key   text not null check (char_length(cache_key) between 3 and 200),
+  city_name   text check (city_name is null or char_length(city_name) &lt;= 200),
+  uf          text check (uf is null or uf ~ &#x27;^[A-Z]{2}$&#x27;),
+  truncated   boolean not null default false,
+  elements    jsonb not null default &#x27;[]&#x27;::jsonb check (jsonb_typeof(elements) = &#x27;array&#x27;),
+  fetched_at  timestamptz not null default now(),
+  constraint osm_cache_user_key_uniq unique (user_id, cache_key)
+);
+
+alter table public.osm_cache enable row level security;
+drop policy if exists osm_cache_own on public.osm_cache;
+create policy osm_cache_own on public.osm_cache for all to authenticated
+  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+revoke all on public.osm_cache from anon;
+grant select, insert, update, delete on public.osm_cache to authenticated;
+
+drop function if exists public.upsert_found_companies(jsonb, text);
+
+create or replace function public.upsert_found_companies(p_items jsonb, p_query text default null,
+                                                         p_source text default &#x27;google_places&#x27;)
+returns jsonb
+language plpgsql
+set search_path = &#x27;&#x27;
+as $$
+declare
+  v_uid uuid := public.require_uid();
+  v_item jsonb;
+  v_id uuid;
+  v_inserted boolean;
+  v_saved_id uuid;
+  v_status text;
+  v_out jsonb := &#x27;[]&#x27;::jsonb;
+  v_new integer := 0;
+begin
+  if p_items is null or jsonb_typeof(p_items) &lt;&gt; &#x27;array&#x27; then
+    raise exception &#x27;Lista de empresas inválida.&#x27; using errcode = &#x27;22023&#x27;;
+  end if;
+  if jsonb_array_length(p_items) &gt; 60 then
+    raise exception &#x27;No máximo 60 empresas por vez.&#x27; using errcode = &#x27;22023&#x27;;
+  end if;
+  if p_source is null or p_source not in (&#x27;google_places&#x27;, &#x27;osm&#x27;) then
+    raise exception &#x27;Fonte inválida.&#x27; using errcode = &#x27;22023&#x27;;
+  end if;
+
+  perform public.purge_expired_place_content(30);
+
+  for v_item in select public.clean_place_item(e) from jsonb_array_elements(p_items) e loop
+    insert into public.companies as c
+      (source, source_id, name, phone, address, city, state, category, website,
+       rating, rating_count, maps_url, business_status, content_fetched_at, last_found_at)
+    values
+      (p_source, v_item-&gt;&gt;&#x27;source_id&#x27;, v_item-&gt;&gt;&#x27;name&#x27;, v_item-&gt;&gt;&#x27;phone&#x27;, v_item-&gt;&gt;&#x27;address&#x27;,
+       v_item-&gt;&gt;&#x27;city&#x27;, v_item-&gt;&gt;&#x27;state&#x27;, v_item-&gt;&gt;&#x27;category&#x27;, v_item-&gt;&gt;&#x27;website&#x27;,
+       (v_item-&gt;&gt;&#x27;rating&#x27;)::numeric, (v_item-&gt;&gt;&#x27;rating_count&#x27;)::integer, v_item-&gt;&gt;&#x27;maps_url&#x27;,
+       v_item-&gt;&gt;&#x27;business_status&#x27;, now(), now())
+    on conflict (user_id, source, source_id) do update set
+       name = excluded.name, phone = excluded.phone, address = excluded.address, city = excluded.city,
+       state = excluded.state, category = excluded.category, website = excluded.website,
+       rating = excluded.rating, rating_count = excluded.rating_count, maps_url = excluded.maps_url,
+       business_status = excluded.business_status, content_fetched_at = now(), last_found_at = now()
+    returning c.id, (c.xmax = 0) into v_id, v_inserted;
+
+    if v_inserted then v_new := v_new + 1; end if;
+
+    select s.id, ct.status into v_saved_id, v_status
+      from public.saved_companies s
+      left join public.contacts ct on ct.saved_company_id = s.id
+     where s.company_id = v_id;
+
+    v_out := v_out || jsonb_build_object(&#x27;id&#x27;, v_id, &#x27;source_id&#x27;, v_item-&gt;&gt;&#x27;source_id&#x27;,
+                                         &#x27;saved&#x27;, v_saved_id is not null, &#x27;contact_status&#x27;, v_status);
+    v_saved_id := null; v_status := null;
+  end loop;
+
+  perform public.log_activity(&#x27;busca&#x27;, &#x27;Busca no Radar&#x27;,
+    jsonb_build_object(&#x27;query&#x27;, left(coalesce(p_query, &#x27;&#x27;), 200), &#x27;source&#x27;, p_source,
+                       &#x27;results&#x27;, jsonb_array_length(p_items), &#x27;new&#x27;, v_new));
+
+  return jsonb_build_object(&#x27;items&#x27;, v_out, &#x27;new&#x27;, v_new);
+end
+$$;
+
+create or replace function public.get_companies_for_refresh(p_ids uuid[])
+returns jsonb
+language plpgsql
+stable
+set search_path = &#x27;&#x27;
+as $$
+begin
+  perform public.require_uid();
+  if p_ids is null or cardinality(p_ids) = 0 or cardinality(p_ids) &gt; 20 then
+    raise exception &#x27;Informe de 1 a 20 empresas.&#x27; using errcode = &#x27;22023&#x27;;
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(&#x27;id&#x27;, c.id, &#x27;source&#x27;, c.source, &#x27;source_id&#x27;, c.source_id,
+                                        &#x27;city&#x27;, c.city, &#x27;state&#x27;, c.state))
+      from public.companies c
+     where c.id = any (p_ids)), &#x27;[]&#x27;::jsonb);
+end
+$$;
+
+create or replace function public.update_company_content(p_items jsonb)
+returns integer
+language plpgsql
+set search_path = &#x27;&#x27;
+as $$
+declare v_item jsonb; v_clean jsonb; v_count integer := 0; v_rows integer;
+begin
+  perform public.require_uid();
+  if p_items is null or jsonb_typeof(p_items) &lt;&gt; &#x27;array&#x27; or jsonb_array_length(p_items) &gt; 20 then
+    raise exception &#x27;Lista inválida.&#x27; using errcode = &#x27;22023&#x27;;
+  end if;
+  for v_item in select * from jsonb_array_elements(p_items) loop
+    v_clean := public.clean_place_item(v_item);
+    update public.companies set
+       name = v_clean-&gt;&gt;&#x27;name&#x27;, phone = v_clean-&gt;&gt;&#x27;phone&#x27;, address = v_clean-&gt;&gt;&#x27;address&#x27;,
+       city = coalesce(v_clean-&gt;&gt;&#x27;city&#x27;, city), state = coalesce(v_clean-&gt;&gt;&#x27;state&#x27;, state),
+       category = v_clean-&gt;&gt;&#x27;category&#x27;,
+       website = v_clean-&gt;&gt;&#x27;website&#x27;, rating = (v_clean-&gt;&gt;&#x27;rating&#x27;)::numeric,
+       rating_count = (v_clean-&gt;&gt;&#x27;rating_count&#x27;)::integer, maps_url = v_clean-&gt;&gt;&#x27;maps_url&#x27;,
+       business_status = v_clean-&gt;&gt;&#x27;business_status&#x27;, content_fetched_at = now()
+     where id = (v_item-&gt;&gt;&#x27;id&#x27;)::uuid and source in (&#x27;google_places&#x27;, &#x27;osm&#x27;) and source_id = v_clean-&gt;&gt;&#x27;source_id&#x27;;
+    get diagnostics v_rows = row_count;
+    v_count := v_count + v_rows;
+  end loop;
+  return v_count;
+end
+$$;
+
+create or replace function public.get_osm_cache(p_key text, p_max_age_hours integer default 168)
+returns jsonb
+language plpgsql
+stable
+set search_path = &#x27;&#x27;
+as $$
+declare r public.osm_cache;
+begin
+  perform public.require_uid();
+  select * into r from public.osm_cache
+   where cache_key = p_key
+     and fetched_at &gt; now() - make_interval(hours =&gt; greatest(1, least(coalesce(p_max_age_hours, 168), 720)));
+  if not found then return null; end if;
+  return jsonb_build_object(&#x27;city_name&#x27;, r.city_name, &#x27;uf&#x27;, r.uf, &#x27;truncated&#x27;, r.truncated,
+                            &#x27;elements&#x27;, r.elements, &#x27;fetched_at&#x27;, r.fetched_at);
+end
+$$;
+
+create or replace function public.put_osm_cache(p_key text, p_city_name text, p_uf text,
+                                                p_truncated boolean, p_elements jsonb)
+returns boolean
+language plpgsql
+set search_path = &#x27;&#x27;
+as $$
+begin
+  perform public.require_uid();
+  if p_key is null or char_length(p_key) not between 3 and 200 then
+    raise exception &#x27;Chave de cache inválida.&#x27; using errcode = &#x27;22023&#x27;;
+  end if;
+  if p_elements is null or jsonb_typeof(p_elements) &lt;&gt; &#x27;array&#x27; or jsonb_array_length(p_elements) &gt; 3000 then
+    raise exception &#x27;Lista de empresas inválida.&#x27; using errcode = &#x27;22023&#x27;;
+  end if;
+  if p_uf is not null and p_uf !~ &#x27;^[A-Z]{2}$&#x27; then
+    raise exception &#x27;UF inválida.&#x27; using errcode = &#x27;22023&#x27;;
+  end if;
+  insert into public.osm_cache (cache_key, city_name, uf, truncated, elements, fetched_at)
+  values (p_key, left(p_city_name, 200), p_uf, coalesce(p_truncated, false), p_elements, now())
+  on conflict (user_id, cache_key) do update
+     set city_name = excluded.city_name, uf = excluded.uf, truncated = excluded.truncated,
+         elements = excluded.elements, fetched_at = now();
+  return true;
+end
+$$;
+
+create or replace function public.dashboard_overview()
+returns jsonb
+language plpgsql
+stable
+set search_path = &#x27;&#x27;
+as $$
+declare v_week timestamptz := date_trunc(&#x27;week&#x27;, now());
+begin
+  perform public.require_uid();
+  return jsonb_build_object(
+    &#x27;stats&#x27;, jsonb_build_object(
+      &#x27;found&#x27;,      (select count(*) from public.companies where source &lt;&gt; &#x27;manual&#x27;),
+      &#x27;saved&#x27;,      (select count(*) from public.saved_companies),
+      &#x27;approached&#x27;, (select count(*) from public.contacts where status &lt;&gt; &#x27;novo&#x27;),
+      &#x27;interested&#x27;, (select count(*) from public.contacts where status in (&#x27;interessado&#x27;, &#x27;cliente_fechado&#x27;)),
+      &#x27;clients&#x27;,    (select count(*) from public.contacts where status = &#x27;cliente_fechado&#x27;),
+      &#x27;sites&#x27;,      (select count(*) from public.projects where current_version_id is not null)),
+    &#x27;funnel&#x27;, coalesce((select jsonb_object_agg(status, n)
+                          from (select status, count(*) n from public.contacts group by status) f), &#x27;{}&#x27;::jsonb),
+    &#x27;weekly&#x27;, (select jsonb_agg(jsonb_build_object(
+                 &#x27;week&#x27;, to_char(w, &#x27;YYYY-MM-DD&#x27;),
+                 &#x27;abordagens&#x27;, (select count(*) from public.contact_history h
+                                 where h.created_at &gt;= w and h.created_at &lt; w + interval &#x27;1 week&#x27;
+                                   and (h.event = &#x27;whatsapp&#x27; or (h.event = &#x27;status&#x27; and h.to_status in (&#x27;abordado&#x27;, &#x27;mensagem_enviada&#x27;)))),
+                 &#x27;respostas&#x27;, (select count(*) from public.contact_history h
+                                 where h.created_at &gt;= w and h.created_at &lt; w + interval &#x27;1 week&#x27;
+                                   and h.event = &#x27;status&#x27; and h.to_status in (&#x27;respondeu&#x27;, &#x27;interessado&#x27;)),
+                 &#x27;fechamentos&#x27;, (select count(*) from public.contact_history h
+                                 where h.created_at &gt;= w and h.created_at &lt; w + interval &#x27;1 week&#x27;
+                                   and h.event = &#x27;status&#x27; and h.to_status = &#x27;cliente_fechado&#x27;))
+                 order by w)
+               from generate_series(v_week - interval &#x27;7 weeks&#x27;, v_week, interval &#x27;1 week&#x27;) w),
+    &#x27;recent_companies&#x27;, coalesce((
+       select jsonb_agg(x order by x.last_found_at desc) from (
+         select c.id, c.name, c.category, c.city, c.state, c.last_found_at, c.source,
+                exists (select 1 from public.saved_companies s where s.company_id = c.id) as saved
+           from public.companies c
+          where c.source &lt;&gt; &#x27;manual&#x27; and c.name is not null
+          order by c.last_found_at desc limit 6) x), &#x27;[]&#x27;::jsonb),
+    &#x27;recent_contacts&#x27;, coalesce((
+       select jsonb_agg(x order by x.last_contact_at desc) from (
+         select contact_id, company_id, display_name, display_phone, status, last_contact_at, content_expired
+           from public.crm_contacts where last_contact_at is not null
+          order by last_contact_at desc limit 6) x), &#x27;[]&#x27;::jsonb),
+    &#x27;activity&#x27;, coalesce((
+       select jsonb_agg(x order by x.created_at desc) from (
+         select a.kind, a.title, a.details, a.created_at,
+                co.name as company_name, p.company_name as project_name
+           from public.activity_log a
+           left join public.companies co on co.id = (a.details-&gt;&gt;&#x27;company_id&#x27;)::uuid
+           left join public.projects p on p.id = (a.details-&gt;&gt;&#x27;project_id&#x27;)::uuid
+          order by a.created_at desc limit 12) x), &#x27;[]&#x27;::jsonb));
+end
+$$;
+
+do $$
+declare f text;
+begin
+  foreach f in array array[
+    &#x27;public.upsert_found_companies(jsonb, text, text)&#x27;,
+    &#x27;public.get_companies_for_refresh(uuid[])&#x27;,
+    &#x27;public.update_company_content(jsonb)&#x27;,
+    &#x27;public.get_osm_cache(text, integer)&#x27;,
+    &#x27;public.put_osm_cache(text, text, text, boolean, jsonb)&#x27;,
+    &#x27;public.dashboard_overview()&#x27;
+  ] loop
+    execute format(&#x27;revoke execute on function %s from public, anon&#x27;, f);
+    execute format(&#x27;grant execute on function %s to authenticated&#x27;, f);
+  end loop;
+end
+$$;
+
+-- remove a extensão temporária usada nos testes da busca grátis
+drop extension if exists http;
+</textarea>
+</main>
+<script>
+{
+  const ta = document.getElementById('sql');
+  const ok = document.getElementById('ok');
+  document.getElementById('copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(ta.value);
+    } catch {
+      ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+      document.execCommand('copy');
+    }
+    ok.textContent = 'Código copiado! Agora abra o SQL Editor.';
+  });
+}
+</script>
+</body>
+</html>

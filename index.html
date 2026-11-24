@@ -609,9 +609,14 @@ function route() {
   content.style.animation = 'none';
   void content.offsetWidth;
   content.style.animation = '';
-  content.innerHTML = r.page.render(params);
+  // Cada página ganha um elemento novo: tarefas assíncronas e eventos da
+  // página anterior ficam presos ao elemento antigo (desconectado) e param.
+  const view = document.createElement('div');
+  view.className = 'view';
+  view.innerHTML = r.page.render(params);
+  content.replaceChildren(view);
   try {
-    const out = r.page.mount?.(content, params, { restart: start });
+    const out = r.page.mount?.(view, params, { restart: start });
     if (out && typeof out.catch === 'function') out.catch((e) => console.error(e));
   } catch (e) {
     console.error(e);
@@ -1614,7 +1619,10 @@ async function mount(root) {
         ${c.saved ? '<span class="badge badge-ok">Salva</span>' : ''}
         <span class="muted" style="font-size:12px;white-space:nowrap">${relTime(c.last_found_at)}</span>
       </div>`).join('')}</div>
-      <div class="muted" style="font-size:11.5px;margin-top:10px">Fonte: Google Maps</div>`;
+      <div class="muted" style="font-size:11.5px;margin-top:10px">Fonte: ${[
+        d.recent_companies.some((c) => c.source !== 'osm') ? 'Google Maps' : '',
+        d.recent_companies.some((c) => c.source === 'osm') ? '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© colaboradores do OpenStreetMap</a>' : '',
+      ].filter(Boolean).join(' · ')}</div>`;
   }
   if (d.recent_contacts?.length) {
     root.querySelector('#dash-contacts').innerHTML = `<div class="list">${d.recent_contacts.map((c) => `
@@ -1661,8 +1669,13 @@ function projectBadge(s) {
   return `<span class="badge ${cls}">${esc(projectStatusLabel(s))}</span>`;
 }
 
+const sourceName = (c) => (c?.source === 'osm' ? 'OpenStreetMap' : 'Google Places');
+const mapLabel = (c) => (c?.source === 'osm' ? 'Ver no OpenStreetMap' : 'Ver no Google Maps');
+// Link de pesquisa (não é dado da fonte): ajuda a conferir se a empresa já tem site ou Instagram.
+const googleSearchUrl = (c) => `https://www.google.com/search?q=${encodeURIComponent([c.name, c.city, c.state].filter(Boolean).join(' '))}`;
+
 /**
- * Card de empresa. Recebe somente dados vindos da fonte (Google Places).
+ * Card de empresa. Recebe somente dados vindos da fonte (Google Places ou OpenStreetMap).
  * Campos ausentes aparecem como "não informado" — nada é inventado.
  */
 function companyCard(c) {
@@ -1689,8 +1702,8 @@ function companyCard(c) {
       ${row('phone', phone.ok ? esc(phone.display) : esc(c.phone || ''), 'Telefone não informado')}
       ${row('pin', esc(c.address || ''), 'Endereço não informado')}
       ${row('globe', site, 'Nenhum site informado na fonte consultada')}
-      ${row('star', rating, 'Sem avaliação na fonte')}
-      ${row('id', c.source_id ? `<span class="muted" style="font-size:12px">Google Places · ${esc(c.source_id)}</span>` : '', 'Sem identificador')}
+      ${c.source === 'osm' ? '' : row('star', rating, 'Sem avaliação na fonte')}
+      ${row('id', c.source_id ? `<span class="muted" style="font-size:12px">${sourceName(c)} · ${esc(c.source_id)}</span>` : '', 'Sem identificador')}
     </dl>
     ${c.contact_status ? `<div class="crm-line">${icon('contacts')} No CRM: ${statusBadge(c.contact_status)}</div>` : ''}
     <div class="actions">
@@ -1700,7 +1713,8 @@ function companyCard(c) {
       <button class="btn" data-act="site">${icon('sparkle')} Criar site</button>
       <button class="btn btn-ghost" data-act="details" style="grid-column:1/-1">${icon('eye')} Ver detalhes</button>
     </div>
-    ${c.maps_url ? `<a class="maps-link" href="${esc(c.maps_url)}" target="_blank" rel="noopener">${icon('map')} Ver no Google Maps</a>` : ''}
+    ${c.maps_url ? `<a class="maps-link" href="${esc(c.maps_url)}" target="_blank" rel="noopener">${icon('map')} ${mapLabel(c)}</a>` : ''}
+    ${c.source === 'osm' ? `<a class="maps-link" href="${esc(googleSearchUrl(c))}" target="_blank" rel="noopener">${icon('search')} Pesquisar no Google</a>` : ''}
   </article>`;
 }
 
@@ -1789,13 +1803,13 @@ function openWhatsAppModal({ name = '', phone = '', companyId = null, onRegister
   });
 }
 
-/** "Ver detalhes": dados atuais + atualização na hora pelo Google (horários, status). */
+/** "Ver detalhes": dados atuais + atualização na hora pela fonte (horários, status). */
 function openDetailsModal(c, { onAction } = {}) {
   openModal(`
-    <div class="eyebrow">Detalhes · Google Places</div>
+    <div class="eyebrow">Detalhes · ${sourceName(c)}</div>
     <h2>${esc(c.name || 'Empresa')}</h2>
     <div id="det-body" style="margin-top:14px">${detailsList(c)}</div>
-    <div id="det-live" style="margin-top:14px"><div class="loading"><span class="spinner"></span>Buscando dados atualizados no Google…</div></div>
+    <div id="det-live" style="margin-top:14px"><div class="loading"><span class="spinner"></span>Buscando dados atualizados no ${sourceName(c)}…</div></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" data-close>Fechar</button>
       <button class="btn" data-act="site">${icon('sparkle')} Criar site para esta empresa</button>
@@ -1814,10 +1828,11 @@ function openDetailsModal(c, { onAction } = {}) {
       Object.assign(c, { ...fresh, saved: c.saved, contact_status: c.contact_status });
       m.querySelector('#det-body').innerHTML = detailsList(c);
       const status = { OPERATIONAL: 'Em funcionamento', CLOSED_TEMPORARILY: 'Fechada temporariamente', CLOSED_PERMANENTLY: 'Fechada permanentemente' }[fresh.business_status] || 'Não informado';
+      const osm = fresh.source === 'osm';
       live.innerHTML = `<div class="card card-graphite" style="padding:16px">
-        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><b>Situação</b><span>${esc(status)}</span></div>
-        ${fresh.opening_hours?.length ? `<div style="margin-top:12px"><b>Horários</b><ul class="hours">${fresh.opening_hours.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>` : '<div class="muted" style="margin-top:10px;font-size:13px">Horários não informados no Google.</div>'}
-        <div class="muted" style="font-size:11.5px;margin-top:12px">Fonte: Google Maps · atualizado agora</div>
+        ${osm ? '' : `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><b>Situação</b><span>${esc(status)}</span></div>`}
+        ${fresh.opening_hours?.length ? `<div style="margin-top:${osm ? 0 : 12}px"><b>Horários</b><ul class="hours">${fresh.opening_hours.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>` : `<div class="muted" style="margin-top:${osm ? 0 : 10}px;font-size:13px">Horários não informados no ${sourceName(fresh)}.</div>`}
+        <div class="muted" style="font-size:11.5px;margin-top:12px">Fonte: ${osm ? '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© colaboradores do OpenStreetMap</a>' : 'Google Maps'} · atualizado agora</div>
       </div>`;
     } catch (err) {
       live.innerHTML = notice(esc(errMsg(err)), 'err');
@@ -1832,15 +1847,15 @@ function detailsList(c) {
     ['pin', 'Endereço', c.address],
     ['tag', 'Categoria', c.category],
     ['globe', 'Site', c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(c.website)}</a>` : '', true],
-    ['star', 'Avaliação no Google', c.rating != null ? `${Number(c.rating).toFixed(1).replace('.', ',')} ★ (${c.rating_count || 0})` : ''],
-    ['map', 'Google Maps', c.maps_url ? `<a href="${esc(c.maps_url)}" target="_blank" rel="noopener">Abrir no Google Maps</a>` : '', true],
+    ...(c.source === 'osm' ? [] : [['star', 'Avaliação no Google', c.rating != null ? `${Number(c.rating).toFixed(1).replace('.', ',')} ★ (${c.rating_count || 0})` : '']]),
+    ['map', c.source === 'osm' ? 'OpenStreetMap' : 'Google Maps', c.maps_url ? `<a href="${esc(c.maps_url)}" target="_blank" rel="noopener">${c.source === 'osm' ? 'Abrir no OpenStreetMap' : 'Abrir no Google Maps'}</a>` : '', true],
   ];
   return `<dl class="details">${items.map(([ico, label, value, isHtml]) => `
     <div><dt>${icon(ico)} ${label}</dt><dd>${value ? (isHtml ? value : esc(value)) : '<span class="muted">Não informado na fonte</span>'}</dd></div>`).join('')}</dl>
-    ${c.website ? '' : '<div class="muted" style="font-size:12.5px;margin-top:8px">Sem site informado no Google — isso não comprova que a empresa não tenha site.</div>'}`;
+    ${c.website ? '' : `<div class="muted" style="font-size:12.5px;margin-top:8px">Sem site informado no ${sourceName(c)} — isso não comprova que a empresa não tenha site.${c.source === 'osm' ? ` <a href="${esc(googleSearchUrl(c))}" target="_blank" rel="noopener">Pesquisar no Google</a>` : ''}</div>`}`;
 }
 
-Object.assign(__exports, { STATUS, statusLabel, statusBadge, PROJECT_STATUS, projectStatusLabel, projectBadge, companyCard, openWhatsAppModal, openDetailsModal });
+Object.assign(__exports, { STATUS, statusLabel, statusBadge, PROJECT_STATUS, projectStatusLabel, projectBadge, sourceName, companyCard, openWhatsAppModal, openDetailsModal });
 };
 
 // ---- lib/charts.js ----
@@ -1916,14 +1931,26 @@ const CATEGORIAS = [
 ];
 
 // Resultados da última busca (mantidos ao trocar de página nesta sessão).
-const state = { query: null, input: null, results: [], nextPageToken: null, stats: null };
+const state = { query: null, input: null, results: [], nextPageToken: null, stats: null, source: null, warning: '', cached: false };
+
+const SOURCE_NAME = { google_places: 'Google Places', osm: 'OpenStreetMap' };
+
+function attributionHtml() {
+  if (state.source === 'osm') {
+    return 'Dados: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© colaboradores do OpenStreetMap</a> (licença ODbL). As empresas de cada cidade ficam guardadas por 7 dias para não consultar de novo.';
+  }
+  if (state.source === 'google_places') {
+    return 'Resultados e avaliações: Google Maps. Os dados do Google ficam guardados por no máximo 30 dias (só o identificador é permanente).';
+  }
+  return 'Fontes: Google Places (quando a chave está configurada) ou OpenStreetMap (gratuito, sem chave).';
+}
 
 function render() {
   const i = state.input || { semSite: true, comTelefone: true };
   const v = (k) => esc(i[k] || '');
   return `
     <div class="card" style="padding:26px">
-      <div class="eyebrow" style="margin-bottom:6px">Busca real · Google Places</div>
+      <div class="eyebrow" style="margin-bottom:6px" id="radar-source">Busca real · ${esc(SOURCE_NAME[state.source] || 'Google Places ou OpenStreetMap')}</div>
       <h2 class="section-title" style="font-size:24px;margin-bottom:18px">Onde estão os seus próximos clientes?</h2>
       <form id="radar-form" class="form-grid" novalidate>
         <label class="field">Nome da empresa<input class="input" name="nome" placeholder="Opcional" autocomplete="off" maxlength="120" value="${v('nome')}"></label>
@@ -1935,6 +1962,7 @@ function render() {
         <label class="field">Estado
           <select class="input" name="uf"><option value="">Todos</option>${UFS.map(([s, n]) => `<option value="${s}"${i.uf === s ? ' selected' : ''}>${n} (${s})</option>`).join('')}</select>
         </label>
+        <p class="muted" style="grid-column:1/-1;margin:0;font-size:13px">Sem a chave do Google, a busca usa o OpenStreetMap (grátis) e precisa da <b style="color:var(--white)">cidade</b>.</p>
         <div class="form-actions">
           <label class="toggle"><input type="checkbox" name="semSite"${i.semSite ? ' checked' : ''}><span class="sw"></span>Apenas empresas sem site informado</label>
           <label class="toggle"><input type="checkbox" name="comTelefone"${i.comTelefone ? ' checked' : ''}><span class="sw"></span>Apenas empresas com telefone</label>
@@ -1946,8 +1974,8 @@ function render() {
     ${sectionHead('Resultados', 'Cada empresa aparece com ações de abordagem, salvamento e criação de site.', '<span class="muted" id="radar-count" style="font-size:13px"></span>')}
     <div id="radar-results" class="grid grid-3"></div>
     <div id="radar-more" style="margin-top:18px;text-align:center"></div>
-    <div style="margin-top:22px">${notice('<strong>Sobre "sem site".</strong> A ausência de site no Google Places significa apenas que <em>nenhum site foi informado nessa fonte</em>. Não comprova que a empresa não tenha site — por isso o selo diz "Sem site na fonte".', 'info')}</div>
-    <p class="muted attribution">Resultados e avaliações: Google Maps. Os dados do Google ficam guardados por no máximo 30 dias (só o identificador é permanente).</p>`;
+    <div style="margin-top:22px">${notice('<strong>Sobre "sem site".</strong> A ausência de site na fonte consultada (Google Places ou OpenStreetMap) significa apenas que <em>nenhum site foi informado nela</em>. Não comprova que a empresa não tenha site — por isso o selo diz "Sem site na fonte".', 'info')}</div>
+    <p class="muted attribution" id="radar-attribution">${attributionHtml()}</p>`;
 }
 
 function renderResults(root) {
@@ -1963,6 +1991,10 @@ function renderResults(root) {
     : `<div style="grid-column:1/-1">${emptyState({ ico: 'search', title: 'Nenhuma empresa com esses filtros', text: 'Tente outra cidade, outro termo ou desligue um dos filtros.' })}</div>`;
   const more = root.querySelector('#radar-more');
   more.innerHTML = state.nextPageToken ? `<button class="btn" id="radar-next">${icon('plus')} Carregar mais resultados</button>` : '';
+  const src = root.querySelector('#radar-source');
+  if (src) src.textContent = `Busca real · ${SOURCE_NAME[state.source] || 'Google Places ou OpenStreetMap'}`;
+  const attr = root.querySelector('#radar-attribution');
+  if (attr) attr.innerHTML = attributionHtml();
 }
 
 function statsLine() {
@@ -1974,7 +2006,16 @@ function statsLine() {
   if (r.phone) parts.push(`${r.phone} sem telefone`);
   if (r.closed) parts.push(`${r.closed} fechada(s) definitivamente`);
   if (r.outside) parts.push(`${r.outside} fora da cidade/estado`);
-  return `Busca: <b>${esc(state.query)}</b>. O Google retornou ${fmtInt(s.returned)} empresa(s) nesta página${parts.length ? `; ocultadas: ${parts.join(', ')}` : ''}.`;
+  const hidden = parts.length ? `; ocultadas: ${parts.join(', ')}` : '';
+  if (state.source === 'osm') {
+    const total = s.city_total != null ? ` (de ${fmtInt(s.city_total)} cadastradas na cidade)` : '';
+    return `Busca: <b>${esc(state.query)}</b>. O OpenStreetMap tem ${fmtInt(s.returned)} empresa(s) com esses critérios${total}${hidden}.${state.cached ? ' Resultado do cache desta cidade.' : ''}`;
+  }
+  return `Busca: <b>${esc(state.query)}</b>. O Google retornou ${fmtInt(s.returned)} empresa(s) nesta página${hidden}.`;
+}
+
+function statusHtml() {
+  return notice(statsLine(), 'info') + (state.warning ? `<div style="margin-top:10px">${notice(esc(state.warning), 'warn')}</div>` : '');
 }
 
 async function search(root, { append = false } = {}) {
@@ -1983,18 +2024,27 @@ async function search(root, { append = false } = {}) {
   await withBusy(button, async () => {
     try {
       const body = { ...state.input, pageToken: append ? state.nextPageToken : undefined };
-      if (!append) root.querySelector('#radar-results').innerHTML = `<div style="grid-column:1/-1">${loading('Buscando no Google Places…')}</div>`;
+      if (!append) root.querySelector('#radar-results').innerHTML = `<div style="grid-column:1/-1">${loading('Buscando empresas… no OpenStreetMap a primeira busca de uma cidade pode levar até 1 minuto.')}</div>`;
       const r = await api.searchPlaces(body);
       if (!root.isConnected) return;
       state.query = r.query;
       state.nextPageToken = r.nextPageToken;
       state.stats = r.stats;
+      state.source = r.source || 'google_places';
+      state.warning = r.warning || '';
+      state.cached = Boolean(r.cached);
       const known = new Set(append ? state.results.map((x) => x.source_id) : []);
       state.results = append ? state.results.concat(r.results.filter((x) => !known.has(x.source_id))) : r.results;
-      status.innerHTML = notice(statsLine(), 'info');
+      status.innerHTML = statusHtml();
       renderResults(root);
     } catch (e) {
-      if (!append) root.querySelector('#radar-results').innerHTML = '';
+      if (!root.isConnected) return;
+      if (!append) {
+        Object.assign(state, { query: null, results: [], nextPageToken: null, stats: null, warning: '' });
+        root.querySelector('#radar-results').innerHTML = '';
+        root.querySelector('#radar-count').textContent = '';
+        root.querySelector('#radar-more').innerHTML = '';
+      }
       status.innerHTML = notice(`<strong>A busca falhou.</strong> ${esc(errMsg(e))}`, 'err');
     }
   }, append ? 'Carregando…' : 'Buscando…');
@@ -2030,7 +2080,7 @@ function mount(root) {
   const form = root.querySelector('#radar-form');
   const status = root.querySelector('#radar-status');
   if (state.query) {
-    status.innerHTML = notice(statsLine(), 'info');
+    status.innerHTML = statusHtml();
     renderResults(root);
   }
   form.addEventListener('submit', (e) => {
@@ -3251,8 +3301,10 @@ function render() {
     ${sectionHead('Integrações', 'Cada estado abaixo vem de um teste real feito agora — nada aparece como conectado sem teste.', isReady() ? `<button class="btn" id="int-refresh">${icon('refresh')} Testar todas</button>` : '')}
     <div class="grid grid-2">
       ${integ('supabase', 'database', 'Supabase', c.url ? BADGE.warn('Testando…') : BADGE.off('Não configurado'), connectionBody(c))}
-      ${integ('places', 'radar', 'Google Places API', isReady() ? BADGE.warn('Testando…') : BADGE.off('Aguardando Supabase'),
-        `<ul><li>Busca real de empresas (função <code>places-search</code>).</li><li id="places-detail">${isReady() ? 'Testando…' : 'Teste disponível após conectar o Supabase e entrar.'}</li><li>A chave fica no Supabase (secret <code>GOOGLE_PLACES_API_KEY</code>), nunca no navegador.</li></ul>`)}
+      ${integ('places', 'radar', 'Google Places API (opcional)', isReady() ? BADGE.warn('Testando…') : BADGE.off('Aguardando Supabase'),
+        `<ul><li>Busca de empresas mais completa (função <code>places-search</code>). Exige conta com faturamento no Google.</li><li id="places-detail">${isReady() ? 'Testando…' : 'Teste disponível após conectar o Supabase e entrar.'}</li><li>A chave fica no Supabase (secret <code>GOOGLE_PLACES_API_KEY</code>), nunca no navegador.</li></ul>`)}
+      ${integ('osm', 'map', 'OpenStreetMap (grátis)', isReady() ? BADGE.warn('Testando…') : BADGE.off('Aguardando Supabase'),
+        `<ul><li>Busca gratuita, sem chave e sem cadastro. Usada quando o Google não está configurado ou falha.</li><li id="osm-detail">${isReady() ? 'Testando…' : 'Teste disponível após conectar o Supabase e entrar.'}</li><li>Tem menos empresas e telefones que o Google. Dados © colaboradores do OpenStreetMap (ODbL).</li></ul>`)}
       ${integ('anthropic', 'sparkle', 'API Anthropic (Claude)', isReady() ? BADGE.warn('Testando…') : BADGE.off('Aguardando Supabase'),
         `<ul><li>Geração de sites (função <code>generate-site</code>).</li><li id="anthropic-detail">${isReady() ? 'Testando…' : 'Teste disponível após conectar o Supabase e entrar.'}</li><li>A chave fica no Supabase (secret <code>ANTHROPIC_API_KEY</code>), nunca no navegador.</li></ul>`)}
       ${integ('whatsapp', 'whatsapp', 'WhatsApp', BADGE.ok('Pronto · sem API'),
@@ -3327,6 +3379,7 @@ async function testServer(root) {
     if (d) d.innerHTML = detailText;
   };
   set('places', BADGE.warn('Testando…'), 'Testando…');
+  set('osm', BADGE.warn('Testando…'), 'Testando…');
   set('anthropic', BADGE.warn('Testando…'), 'Testando…');
   try {
     const r = await api.integrations();
@@ -3334,10 +3387,20 @@ async function testServer(root) {
       x.ok ? BADGE.ok(okText) : x.configured ? BADGE.err('Falhou') : BADGE.off('Não configurado'),
       x.ok ? esc(x.message) : `<span style="color:${x.configured ? 'var(--danger)' : 'var(--gray)'}">${esc(x.message)}</span>`);
     show('places', r.places, 'Conectado');
+    if (!r.places.configured) {
+      set('places', BADGE.off('Não configurado'), `<span style="color:var(--gray)">${esc(r.places.message)} A busca usa o OpenStreetMap (grátis).</span>`);
+    }
+    if (r.osm) {
+      show('osm', r.osm, r.search_source === 'osm' ? 'Em uso' : 'Reserva');
+      if (!r.osm.ok) set('osm', BADGE.warn('Sem resposta agora'), `<span style="color:var(--gray)">${esc(r.osm.message)}</span>`);
+    } else {
+      set('osm', BADGE.off('Atualize as funções'), 'Publique a nova versão da função integrations-status.');
+    }
     show('anthropic', r.anthropic, r.anthropic.model_name || 'Conectado');
   } catch (e) {
     const msg = `<span style="color:var(--danger)">${esc(errMsg(e))}</span>`;
     set('places', BADGE.err('Indisponível'), msg);
+    set('osm', BADGE.err('Indisponível'), msg);
     set('anthropic', BADGE.err('Indisponível'), msg);
   }
 }
