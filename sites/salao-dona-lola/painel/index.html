@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agendamentos · Dona Lola</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#12080c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=DM+Sans:wght@400;500;700&family=Pinyon+Script&display=swap" rel="stylesheet">
+<style>
+:root{
+  --noite:#12080c; --noite-2:#1c0c13; --vinho:#4a1226; --marfim:#fffaf6; --cinza:#b9a3a9;
+  --ouro:#d4a853; --ouro-claro:#f6dc9c; --rosa-forte:#e0668f; --verde:#49c27e; --vermelho:#ff8fa3;
+  --metal:linear-gradient(100deg,#9a6b26 0%,#e9c46f 18%,#fff1c4 32%,#d7a54c 48%,#f7dc96 66%,#a8772d 84%,#f0cd7b 100%);
+  --ease:cubic-bezier(.2,.7,.1,1);
+  --script:"Pinyon Script","Great Vibes",cursive;
+  --serif:"Cormorant Garamond",Georgia,serif;
+  --sans:"DM Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box}
+*{min-width:0}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;color:var(--marfim);font:15.5px/1.5 var(--sans);-webkit-font-smoothing:antialiased;
+  background:radial-gradient(90% 50% at 100% 0%,rgba(179,51,94,.22),transparent 60%),radial-gradient(70% 50% at 0% 100%,rgba(212,168,83,.1),transparent 60%),var(--noite);background-attachment:fixed}
+h1,h2,h3,p{margin:0}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--ouro-claro);outline-offset:3px;border-radius:8px}
+.wrap{width:100%;max-width:880px;margin:0 auto;padding:0 18px}
+.marca{font:400 40px/1 var(--script);padding:.08em .3em .16em .1em;margin:-.08em -.3em -.16em -.1em;background:var(--metal);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:999px;border:1px solid rgba(246,220,156,.28);background:rgba(255,255,255,.05);
+  font-weight:700;font-size:14px;text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .3s var(--ease),background .3s,border-color .3s,opacity .3s}
+.btn:hover{background:rgba(255,255,255,.1)}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.5;pointer-events:none}
+.btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.btn-ouro{border:0;color:#2b1405;background:linear-gradient(100deg,#c9973f,#f3d58f 45%,#d9ab55 70%,#b98633);box-shadow:0 12px 26px -14px rgba(212,168,83,.8)}
+.btn-ouro:hover{background:linear-gradient(100deg,#d2a24a,#f7de9f 45%,#e0b562 70%,#c4913d)}
+.btn-zap{border:0;background:#1fa855;color:#fff}
+.btn-zap:hover{background:#23b85e}
+.btn-perigo{border-color:rgba(255,143,163,.4);color:#ffc2cd}
+.btn-perigo.confirmar{background:rgba(255,143,163,.18);border-color:var(--vermelho);color:#fff}
+.btn-icone{width:44px;padding:0}
+
+/* login */
+.login{min-height:100vh;min-height:100svh;display:grid;place-items:center;padding:24px 18px}
+.login-cartao{width:100%;max-width:400px;padding:34px 26px;border-radius:28px;background:rgba(255,255,255,.045);border:1px solid rgba(246,220,156,.2);
+  -webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 40px 80px -40px #000;animation:subir .9s var(--ease) both}
+.login-cartao .marca{display:inline-block}
+.login-cartao h1{margin-top:14px;font:500 30px/1.1 var(--serif)}
+.login-cartao p.sub{margin-top:6px;color:var(--cinza);font-size:14px}
+.campo{display:block;margin-top:16px}
+.campo span{display:block;margin-bottom:6px;font-size:13px;color:var(--cinza)}
+.campo input{width:100%;padding:14px 16px;border-radius:14px;border:1px solid rgba(246,220,156,.22);background:rgba(0,0,0,.3);color:var(--marfim);font:16px var(--sans)}
+.campo input:focus{outline:none;border-color:var(--ouro);box-shadow:0 0 0 4px rgba(212,168,83,.18)}
+.login .btn-ouro{width:100%;margin-top:22px;min-height:52px;font-size:15px}
+.aviso{margin-top:14px;padding:12px 14px;border-radius:14px;font-size:14px;line-height:1.45}
+.aviso.erro{background:rgba(255,143,163,.12);border:1px solid rgba(255,143,163,.4);color:#ffd2da}
+.aviso.info{background:rgba(246,220,156,.08);border:1px solid rgba(246,220,156,.25);color:var(--ouro-claro)}
+.voltar{display:block;margin-top:18px;text-align:center;font-size:13.5px;color:var(--cinza)}
+
+/* painel */
+.topo{position:sticky;top:0;z-index:10;background:rgba(18,8,12,.82);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid rgba(246,220,156,.12)}
+.topo .wrap{display:flex;align-items:center;gap:10px;min-height:68px}
+.topo .marca{font-size:32px;margin-right:auto}
+.topo .marca small{display:block;margin-top:3px;font:500 10px/1 var(--sans);letter-spacing:.3em;text-transform:uppercase;-webkit-text-fill-color:var(--cinza)}
+.cabeca{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:28px 0 18px}
+.cabeca h1{font:500 clamp(34px,7vw,46px)/1 var(--serif)}
+.cabeca h1 em{font-style:italic;color:var(--ouro-claro)}
+.atualizado{font-size:12.5px;color:var(--cinza)}
+.abas{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid rgba(246,220,156,.14)}
+.aba{position:relative;z-index:1;min-height:42px;border:0;border-radius:12px;background:none;cursor:pointer;font-weight:600;font-size:14px;color:var(--cinza);transition:color .3s}
+.aba[aria-selected="true"]{color:#2b1405}
+.aba .n{display:inline-grid;place-items:center;min-width:22px;height:22px;margin-left:6px;padding:0 6px;border-radius:999px;background:rgba(255,255,255,.1);font-size:12px}
+.aba[aria-selected="true"] .n{background:rgba(43,20,5,.15)}
+.indicador{position:absolute;z-index:0;top:4px;bottom:4px;left:4px;width:calc((100% - 16px) / 3);border-radius:12px;background:var(--metal);box-shadow:0 8px 20px -10px rgba(212,168,83,.8);transition:transform .45s var(--ease)}
+.lista{display:grid;gap:12px;margin:18px 0 60px}
+.vazio{padding:46px 20px;text-align:center;color:var(--cinza);border:1px dashed rgba(246,220,156,.2);border-radius:22px;animation:subir .6s var(--ease) both}
+.vazio b{display:block;margin-bottom:4px;font:500 24px/1.2 var(--serif);color:var(--marfim)}
+.pedido{position:relative;padding:18px 18px 16px;border-radius:22px;background:rgba(255,255,255,.045);border:1px solid rgba(246,220,156,.16);
+  box-shadow:0 24px 50px -36px #000;animation:subir .6s var(--ease) both;animation-delay:calc(var(--i,0) * 55ms);transition:border-color .3s,opacity .4s,transform .4s var(--ease)}
+.pedido.saindo{opacity:0;transform:translateX(30px) scale(.98)}
+.pedido.pendente{border-color:rgba(246,220,156,.45)}
+.pedido.pendente::before{content:"";position:absolute;left:0;top:18px;bottom:18px;width:3px;border-radius:0 3px 3px 0;background:var(--metal)}
+.linha1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.data{font:600 22px/1.1 var(--serif)}
+.periodo{padding:4px 10px;border-radius:999px;background:rgba(246,220,156,.12);color:var(--ouro-claro);font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.status{margin-left:auto;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700}
+.status.pendente{background:rgba(246,220,156,.16);color:var(--ouro-claro)}
+.status.confirmado{background:rgba(73,194,126,.16);color:#8fe0b1}
+.status.concluido{background:rgba(255,255,255,.1);color:var(--cinza)}
+.status.cancelado{background:rgba(255,143,163,.14);color:#ffb3c1}
+.servicos{margin-top:10px;font-weight:600;font-size:16px}
+.cliente{margin-top:4px;color:var(--cinza);font-size:14.5px}
+.cliente b{color:var(--marfim);font-weight:600}
+.obs{margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(0,0,0,.25);color:rgba(255,250,246,.85);font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere}
+.quando{margin-top:8px;font-size:12px;color:rgba(185,163,169,.8)}
+.acoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.acoes .btn{min-height:40px;padding:0 14px;font-size:13.5px}
+.carregando{display:grid;place-items:center;padding:60px 0}
+.giro{width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(246,220,156,.2);border-top-color:var(--ouro-claro);animation:girar .8s linear infinite}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));z-index:50;max-width:calc(100% - 36px);padding:12px 18px;border-radius:14px;background:#2a1019;border:1px solid rgba(246,220,156,.3);
+  box-shadow:0 20px 40px -20px #000;font-size:14px;opacity:0;visibility:hidden;transform:translate(-50%,calc(100% + 40px));transition:transform .45s var(--ease),opacity .3s,visibility 0s linear .45s}
+.toast.mostrar{opacity:1;visibility:visible;transform:translate(-50%,0);transition:transform .45s var(--ease),opacity .3s,visibility 0s}
+.toast.erro{border-color:rgba(255,143,163,.5);color:#ffd2da}
+@keyframes subir{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes girar{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-delay:0s!important;transition-duration:.001ms!important}}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+
+<section class="login" id="tela-login" hidden>
+  <form class="login-cartao" id="form-login" novalidate>
+    <span class="marca">Dona Lola</span>
+    <h1>Área do salão</h1>
+    <p class="sub">Entre para ver os pedidos de agendamento.</p>
+    <label class="campo"><span>E-mail</span><input name="email" type="email" autocomplete="username" inputmode="email" required></label>
+    <label class="campo"><span>Senha</span><input name="senha" type="password" autocomplete="current-password" required></label>
+    <button class="btn btn-ouro" id="entrar" type="submit">Entrar</button>
+    <p class="aviso erro" id="login-erro" role="alert" hidden></p>
+    <a class="voltar" href="../">Voltar ao site</a>
+  </form>
+</section>
+
+<section id="tela-painel" hidden>
+  <header class="topo">
+    <div class="wrap">
+      <span class="marca">Dona Lola<small>Agendamentos</small></span>
+      <button class="btn btn-icone" id="atualizar" type="button" aria-label="Atualizar lista">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+      </button>
+      <button class="btn" id="sair" type="button">Sair</button>
+    </div>
+  </header>
+  <main class="wrap">
+    <div class="cabeca">
+      <h1>Pedidos de <em>agendamento</em></h1>
+      <p class="atualizado" id="atualizado" aria-live="polite"></p>
+    </div>
+    <p class="aviso info" id="aviso-acesso" hidden></p>
+    <div class="abas" role="tablist" aria-label="Filtrar pedidos">
+      <span class="indicador" id="indicador" aria-hidden="true"></span>
+      <button class="aba" role="tab" type="button" data-aba="pendentes" aria-selected="true">Pendentes<span class="n" id="n-pendentes">0</span></button>
+      <button class="aba" role="tab" type="button" data-aba="proximos" aria-selected="false">Próximos<span class="n" id="n-proximos">0</span></button>
+      <button class="aba" role="tab" type="button" data-aba="historico" aria-selected="false">Histórico<span class="n" id="n-historico">0</span></button>
+    </div>
+    <div class="lista" id="lista" aria-live="polite"></div>
+  </main>
+</section>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+  const CFG = {
+    url: 'https://gzzjeyptwruudsaqayyo.supabase.co',
+    chave: 'sb_publishable_UHdvh20oqtgAq2wAxqZcnw_MVSEnbCP',
+    site: 'salao-dona-lola',
+    nomeSalao: 'Dona Lola Salão de Beleza',
+    chaveSessao: 'lola.painel.sessao.v1',
+  };
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => Array.from(document.querySelectorAll(s));
+
+  // ---------- elementos com texto seguro (nunca innerHTML com dados de clientes) ----------
+  const h = (tag, attrs, ...filhos) => {
+    const el = document.createElement(tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => {
+      if (v == null || v === false) return;
+      if (k === 'class') el.className = v;
+      else if (k === 'style') el.style.cssText = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? '' : String(v));
+    });
+    filhos.flat().forEach((f) => { if (f != null && f !== false) el.append(f instanceof Node ? f : document.createTextNode(String(f))); });
+    return el;
+  };
+
+  // ---------- sessão ----------
+  let sessao = null;
+  const lerSessao = () => {
+    try {
+      const s = JSON.parse(localStorage.getItem(CFG.chaveSessao) || 'null');
+      return s && s.access_token ? s : null;
+    } catch (e) { return null; }
+  };
+  const salvarSessao = (s) => {
+    sessao = s;
+    try {
+      if (s) localStorage.setItem(CFG.chaveSessao, JSON.stringify(s));
+      else localStorage.removeItem(CFG.chaveSessao);
+    } catch (e) { /* só em memória */ }
+  };
+  const guardar = (d) => salvarSessao({
+    access_token: d.access_token,
+    refresh_token: d.refresh_token,
+    expires_at: d.expires_at || Math.floor(Date.now() / 1000) + (Number(d.expires_in) || 3600),
+    email: (d.user && d.user.email) || '',
+  });
+
+  const traduzir = (msg, status) => {
+    if (/invalid login credentials/i.test(msg)) return 'E-mail ou senha incorretos.';
+    if (/email not confirmed/i.test(msg)) return 'E-mail ainda não confirmado.';
+    if (/jwt expired|invalid jwt|bad_jwt/i.test(msg)) return 'Sessão expirada. Entre de novo.';
+    if (/permission denied/i.test(msg)) return 'Sem permissão para essa ação.';
+    if (status === 429) return 'Muitas tentativas. Aguarde um pouco e tente de novo.';
+    return msg || `Erro ${status}`;
+  };
+  class ErroApi extends Error { constructor(m, s) { super(m); this.status = s; } }
+  const erroDe = async (res) => {
+    const t = await res.text().catch(() => '');
+    let d = null;
+    try { d = JSON.parse(t); } catch (e) { /* texto */ }
+    const bruto = (d && (d.error_description || d.msg || d.message || (typeof d.error === 'string' ? d.error : ''))) || t;
+    return new ErroApi(traduzir(String(bruto || ''), res.status), res.status);
+  };
+  const chamar = async (caminho, init) => {
+    try { return await fetch(CFG.url + caminho, init); }
+    catch (e) { throw new ErroApi('Sem conexão com a internet. Confira e tente de novo.', 0); }
+  };
+
+  let renovando = null;
+  const renovar = async () => {
+    const res = await chamar('/auth/v1/token?grant_type=refresh_token', {
+      method: 'POST',
+      headers: { apikey: CFG.chave, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: sessao && sessao.refresh_token }),
+    });
+    if (!res.ok) { salvarSessao(null); throw new ErroApi('Sessão expirada. Entre de novo.', 401); }
+    guardar(await res.json());
+  };
+  const garantirSessao = async () => {
+    if (!sessao) throw new ErroApi('Entre de novo.', 401);
+    if (sessao.expires_at * 1000 - Date.now() > 60000) return;
+    if (!renovando) renovando = renovar().finally(() => { renovando = null; });
+    await renovando;
+  };
+  const api = async (caminho, { method = 'GET', body, prefer } = {}) => {
+    await garantirSessao();
+    const headers = { apikey: CFG.chave, Authorization: `Bearer ${sessao.access_token}`, Accept: 'application/json' };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (prefer) headers.Prefer = prefer;
+    const res = await chamar(caminho, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (res.status === 401) { salvarSessao(null); throw new ErroApi('Sessão expirada. Entre de novo.', 401); }
+    if (!res.ok) throw await erroDe(res);
+    if (res.status === 204) return null;
+    const t = await res.text();
+    return t ? JSON.parse(t) : null;
+  };
+
+  // ---------- telas ----------
+  const telaLogin = $('#tela-login');
+  const telaPainel = $('#tela-painel');
+  const mostrarLogin = (aviso) => {
+    pararAuto();
+    telaPainel.hidden = true;
+    telaLogin.hidden = false;
+    const e = $('#login-erro');
+    e.hidden = !aviso;
+    e.textContent = aviso || '';
+    document.title = 'Área do salão · Dona Lola';
+  };
+  const mostrarPainel = () => {
+    telaLogin.hidden = true;
+    telaPainel.hidden = false;
+    carregar(true);
+    iniciarAuto();
+  };
+
+  $('#form-login').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = ev.currentTarget;
+    const email = f.email.value.trim();
+    const senha = f.senha.value;
+    const e = $('#login-erro');
+    e.hidden = true;
+    if (!email || !senha) { e.textContent = 'Informe e-mail e senha.'; e.hidden = false; return; }
+    const b = $('#entrar');
+    b.disabled = true;
+    b.textContent = 'Entrando…';
+    try {
+      const res = await chamar('/auth/v1/token?grant_type=password', {
+        method: 'POST',
+        headers: { apikey: CFG.chave, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: senha }),
+      });
+      if (!res.ok) throw await erroDe(res);
+      guardar(await res.json());
+      f.senha.value = '';
+      mostrarPainel();
+    } catch (err) {
+      e.textContent = err.message;
+      e.hidden = false;
+    } finally {
+      b.disabled = false;
+      b.textContent = 'Entrar';
+    }
+  });
+
+  $('#sair').addEventListener('click', async () => {
+    const s = sessao;
+    salvarSessao(null);
+    if (s) chamar('/auth/v1/logout', { method: 'POST', headers: { apikey: CFG.chave, Authorization: `Bearer ${s.access_token}` } }).catch(() => {});
+    mostrarLogin();
+  });
+
+  // ---------- dados ----------
+  const SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+  const SEMANA_LONGA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+  const PERIODO = { manha: 'Manhã', tarde: 'Tarde', noite: 'Noite' };
+  const PERIODO_FRASE = { manha: 'de manhã', tarde: 'à tarde', noite: 'à noite' };
+  const STATUS = { pendente: 'Pendente', confirmado: 'Confirmado', concluido: 'Concluído', cancelado: 'Cancelado' };
+  const dois = (n) => String(n).padStart(2, '0');
+  const hojeIso = () => { const d = new Date(); return `${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}`; };
+  const partes = (iso) => { const [a, m, d] = iso.split('-').map(Number); return new Date(a, m - 1, d, 12); };
+  const dataCurta = (iso) => { const d = partes(iso); return `${SEMANA[d.getDay()]}, ${dois(d.getDate())}/${dois(d.getMonth() + 1)}`; };
+  const dataLonga = (iso) => { const d = partes(iso); return `${SEMANA_LONGA[d.getDay()]}, ${dois(d.getDate())}/${dois(d.getMonth() + 1)}`; };
+  const fone = (p) => {
+    const d = String(p || '').replace(/^55/, '');
+    return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d.length === 10 ? `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}` : p;
+  };
+  const relativo = (iso) => {
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return 'agora mesmo';
+    if (s < 3600) return `há ${Math.round(s / 60)} min`;
+    if (s < 86400) return `há ${Math.round(s / 3600)} h`;
+    const d = Math.round(s / 86400);
+    return d === 1 ? 'ontem' : `há ${d} dias`;
+  };
+
+  let pedidos = [];
+  let aba = 'pendentes';
+  let carregandoAgora = false;
+  const daAba = (p, qual) => {
+    const futuro = p.booking_date >= hojeIso();
+    if (qual === 'pendentes') return p.status === 'pendente';
+    if (qual === 'proximos') return p.status === 'confirmado' && futuro;
+    return p.status === 'concluido' || p.status === 'cancelado' || (p.status === 'confirmado' && !futuro);
+  };
+
+  const mensagemZap = (p) => {
+    const primeiro = String(p.customer_name || '').split(' ')[0];
+    const serv = (p.services || []).join(' + ');
+    const quando = `${dataLonga(p.booking_date)}, ${PERIODO_FRASE[p.period] || ''}`;
+    if (p.status === 'confirmado') return `Olá, ${primeiro}! Aqui é do ${CFG.nomeSalao}. Passando para lembrar do seu horário: ${serv}, ${quando}. Até lá!`;
+    if (p.status === 'cancelado') return `Olá, ${primeiro}! Aqui é do ${CFG.nomeSalao}. Sobre o seu pedido de ${serv} para ${quando}: infelizmente não vamos conseguir atender nesse dia. Podemos marcar outra data?`;
+    return `Olá, ${primeiro}! Aqui é do ${CFG.nomeSalao}. Recebemos seu pedido de ${serv} para ${quando}. Qual horário fica melhor para você?`;
+  };
+
+  const toast = (texto, erro) => {
+    const t = $('#toast');
+    t.textContent = texto;
+    t.classList.toggle('erro', Boolean(erro));
+    t.classList.add('mostrar');
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => t.classList.remove('mostrar'), 3200);
+  };
+
+  const mudarStatus = async (p, novo, cartao) => {
+    try {
+      const r = await api(`/rest/v1/site_bookings?id=eq.${encodeURIComponent(p.id)}`, { method: 'PATCH', body: { status: novo }, prefer: 'return=representation' });
+      if (!Array.isArray(r) || !r.length) throw new ErroApi('Sem permissão para alterar este pedido.', 403);
+      Object.assign(p, r[0]);
+      toast(`Pedido marcado como ${STATUS[novo].toLowerCase()}.`);
+      if (!daAba(p, aba)) {
+        cartao.classList.add('saindo');
+        setTimeout(render, 380);
+      } else {
+        render();
+      }
+    } catch (err) {
+      if (err.status === 401) return mostrarLogin(err.message);
+      toast(err.message, true);
+    }
+  };
+
+  const excluir = async (p, botao, cartao) => {
+    if (!botao.classList.contains('confirmar')) {
+      botao.classList.add('confirmar');
+      botao.textContent = 'Toque de novo para excluir';
+      clearTimeout(botao.t);
+      botao.t = setTimeout(() => { botao.classList.remove('confirmar'); botao.textContent = 'Excluir'; }, 4000);
+      return;
+    }
+    try {
+      await api(`/rest/v1/site_bookings?id=eq.${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+      pedidos = pedidos.filter((x) => x.id !== p.id);
+      cartao.classList.add('saindo');
+      setTimeout(render, 380);
+      toast('Pedido excluído.');
+    } catch (err) {
+      if (err.status === 401) return mostrarLogin(err.message);
+      toast(err.message, true);
+    }
+  };
+
+  const ICONE_ZAP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6a8.6 8.6 0 0 1-12.7 7.5L3.5 20.5l1.4-4.1a8.6 8.6 0 1 1 15.6-4.8z"/></svg>';
+  const cartaoPedido = (p, i) => {
+    const acoes = [];
+    const zap = h('a', { class: 'btn btn-zap', href: `https://wa.me/${p.customer_phone}?text=${encodeURIComponent(mensagemZap(p))}`, target: '_blank', rel: 'noopener' }, 'WhatsApp');
+    zap.insertAdjacentHTML('afterbegin', ICONE_ZAP); // desenho fixo, sem dados de clientes
+    acoes.push(zap);
+    const cartao = h('article', { class: `pedido ${p.status}`, style: `--i:${i}` });
+    const botaoStatus = (rotulo, novo, classe) => h('button', { class: `btn ${classe || ''}`, type: 'button', onclick: () => mudarStatus(p, novo, cartao) }, rotulo);
+    if (p.status === 'pendente') acoes.push(botaoStatus('Confirmar', 'confirmado', 'btn-ouro'), botaoStatus('Recusar', 'cancelado'));
+    if (p.status === 'confirmado') acoes.push(botaoStatus('Concluído', 'concluido', 'btn-ouro'), botaoStatus('Cancelar', 'cancelado'));
+    if (p.status === 'concluido' || p.status === 'cancelado') acoes.push(botaoStatus('Reabrir', 'pendente'));
+    const bExcluir = h('button', { class: 'btn btn-perigo', type: 'button' }, 'Excluir');
+    bExcluir.addEventListener('click', () => excluir(p, bExcluir, cartao));
+    acoes.push(bExcluir);
+
+    cartao.append(
+      h('div', { class: 'linha1' },
+        h('span', { class: 'data' }, dataCurta(p.booking_date)),
+        h('span', { class: 'periodo' }, PERIODO[p.period] || p.period),
+        h('span', { class: `status ${p.status}` }, STATUS[p.status] || p.status)),
+      h('p', { class: 'servicos' }, (p.services || []).join(' + ')),
+      h('p', { class: 'cliente' }, h('b', {}, p.customer_name), ` · ${fone(p.customer_phone)}`),
+      p.note ? h('p', { class: 'obs' }, p.note) : null,
+      h('p', { class: 'quando' }, `Pedido feito ${relativo(p.created_at)}`),
+      h('div', { class: 'acoes' }, acoes),
+    );
+    return cartao;
+  };
+
+  const render = () => {
+    const lista = $('#lista');
+    const n = { pendentes: 0, proximos: 0, historico: 0 };
+    pedidos.forEach((p) => { ['pendentes', 'proximos', 'historico'].forEach((a) => { if (daAba(p, a)) n[a] += 1; }); });
+    Object.keys(n).forEach((a) => { $(`#n-${a}`).textContent = String(n[a]); });
+    document.title = n.pendentes ? `(${n.pendentes}) Agendamentos · Dona Lola` : 'Agendamentos · Dona Lola';
+    let itens = pedidos.filter((p) => daAba(p, aba));
+    if (aba === 'historico') itens = itens.slice().sort((a, b) => (b.booking_date + b.created_at).localeCompare(a.booking_date + a.created_at));
+    lista.replaceChildren();
+    if (!itens.length) {
+      const vazio = {
+        pendentes: ['Nenhum pedido pendente', 'Quando alguém pedir horário pelo site, ele aparece aqui.'],
+        proximos: ['Nada confirmado por enquanto', 'Pedidos confirmados com data de hoje em diante ficam aqui.'],
+        historico: ['Histórico vazio', 'Pedidos concluídos, cancelados ou com data passada ficam aqui.'],
+      }[aba];
+      lista.append(h('div', { class: 'vazio' }, h('b', {}, vazio[0]), vazio[1]));
+      return;
+    }
+    itens.forEach((p, i) => lista.append(cartaoPedido(p, Math.min(i, 8))));
+  };
+
+  const carregar = async (mostrarGiro) => {
+    if (carregandoAgora) return;
+    carregandoAgora = true;
+    const lista = $('#lista');
+    if (mostrarGiro && !pedidos.length) lista.replaceChildren(h('div', { class: 'carregando' }, h('span', { class: 'giro' })));
+    try {
+      const cfg = await api(`/rest/v1/site_config?site_slug=eq.${CFG.site}&select=site_name`);
+      const aviso = $('#aviso-acesso');
+      if (!Array.isArray(cfg) || !cfg.length) {
+        aviso.textContent = 'Esta conta não tem acesso ao painel deste salão.';
+        aviso.hidden = false;
+        pedidos = [];
+        lista.replaceChildren();
+        return;
+      }
+      aviso.hidden = true;
+      pedidos = await api(`/rest/v1/site_bookings?site_slug=eq.${CFG.site}&select=id,services,booking_date,period,customer_name,customer_phone,note,status,created_at,updated_at&order=booking_date.asc,created_at.asc&limit=500`) || [];
+      const agora = new Date();
+      $('#atualizado').textContent = `Atualizado às ${dois(agora.getHours())}:${dois(agora.getMinutes())}`;
+      render();
+    } catch (err) {
+      if (err.status === 401) return mostrarLogin(err.message);
+      if (!pedidos.length) lista.replaceChildren(h('div', { class: 'vazio' }, h('b', {}, 'Não foi possível carregar'), err.message));
+      else toast(err.message, true);
+    } finally {
+      carregandoAgora = false;
+    }
+  };
+
+  // abas
+  const indicador = $('#indicador');
+  $$('.aba').forEach((b, i) => b.addEventListener('click', () => {
+    aba = b.dataset.aba;
+    $$('.aba').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+    indicador.style.transform = `translateX(calc(${i * 100}% + ${i * 4}px))`;
+    render();
+  }));
+
+  // atualização
+  $('#atualizar').addEventListener('click', () => carregar(false).then(() => toast('Lista atualizada.')));
+  let auto = null;
+  const iniciarAuto = () => { pararAuto(); auto = setInterval(() => { if (!document.hidden) carregar(false); }, 60000); };
+  const pararAuto = () => { if (auto) clearInterval(auto); auto = null; };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && sessao && !telaPainel.hidden) carregar(false); });
+
+  // início
+  sessao = lerSessao();
+  if (sessao) mostrarPainel(); else mostrarLogin();
+})();
+</script>
+</body>
+</html>
